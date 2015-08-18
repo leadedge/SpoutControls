@@ -3,74 +3,6 @@
 //
 //		Allows an application to control a Spout sender
 //
-//		CONTROLLER
-//
-//		  SETUP
-//			1) Controls are established using a JSON template file
-//			   based on the requirements of the proposed sender
-//			2) Using this template file, the controller configures
-//			   it's user interface with the required controls
-//			3) Create a vector of controls with : name, type, value, text
-//			4) Create the controller memory mapping for communication with the sender
-//					CreateControls(string mapname, vector<control> controls);
-//					This creates :
-//						A mutex to control access to the memory map
-//						A registry entry with the map name for the sender to retrieve
-//
-//		   OPERATION
-//			1) Update the controls vector and the controller map when the controls change
-//					SetControls (string mapname, vector<control> controls);
-//						This releases the access mutex for the sender to read
-//						Sends a "Ready" message to the mailslot with name defined by the mapname
-//						WriteMail(string mapname, string SlotMessage);
-//					It will fail if the mailsot has not been created by the sender,	but the
-//					sender will get the message if it is running and act on the new controls
-//
-//		  SHUTDOWN
-//			1)		ReleaseControls()
-//			   This :
-//					Closes the memory map and it's handle
-//					Closes the access mutex handle
-//					Writes a null string to the registry memory map name
-//				Only the app that Created the control map should release it
-//
-//
-//		SENDER
-//
-//		  SETUP
-//			1) Create an empty control vector
-//			2) Find the control map name in the registry if it exists
-//					FindControls();
-//					This :
-//						Finds the map name in the registry
-//						Creates a mailslot to receive messages from the controller
-//						and returns a handle to the mail that can be used to access it.
-//						CreateMail(string mapname, HANDLE &hSlot);
-//			3) Get the control data from the control map into the control vector
-//					GetControls(vector<control> &controls);
-//					This :
-//						Checks the access mutex
-//						Locks the access mutex
-//						Reads the memory map
-//						Releases the access mutex
-//
-//		  OPERATION
-//			1) Check for updated controls
-//					CheckControls(vector<control> &controls);
-//					This :
-//						Checks for a message in the mailslot from the controller
-//						which means that controls have been updated by SetControls
-//							CheckMail(string mapname, HANDLE hSlot);
-//						Gets the latest control data from the control map
-//							GetControls(vector<control> &controls);
-//			2) Use the new control data
-//
-//		  SHUTDOWN
-//			1) Managed by the class destructor
-//				Releases the mailsot
-//					CloseHandle(hSlot);
-//				Releases mutex and map
-//
 // ====================================================================================
 //		Revisions :
 //
@@ -84,6 +16,7 @@
 //					- removed  clear control file path from the registry
 //					  so that it remains for controllers to find the last sender started
 //		27.07.15	- Added "OpenSpoutController"
+//		18.08.15	- Cleanup for 1.002 release
 //
 // ====================================================================================
 //

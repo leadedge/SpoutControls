@@ -25,6 +25,11 @@
 		OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
+// ====================================================================================
+//		Revisions :
+//
+//		18.08.15	- Cleanup for 1.002 release
+//
 #pragma once
 
 #ifndef __SpoutControls__
