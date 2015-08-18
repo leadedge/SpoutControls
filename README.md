@@ -11,7 +11,5 @@ Example controlled Senders for Openframeworks, Cinder and Processing can be used
 
 Credit to Eric Medine - http://ericmedine.com/ - who came up with the idea.
 
-Introduction video by Eric : https://vimeo.com/136557785
-
 SpoutControls is licenced using the GNU Lesser General Public License.
 
