@@ -9,7 +9,9 @@ Controllers are a Freeframe plugin which is itself a Spout Receiver, and a stand
 
 Example controlled Senders for Openframeworks, Cinder and Processing can be used a guide for developing others.
 
-Credit to Eric Medine who came up with the idea.
+Credit to Eric Medine - http://ericmedine.com/ - who came up with the idea.
+
+Introduction video by Eric : https://vimeo.com/136557785
 
 SpoutControls is licenced using the GNU Lesser General Public License.
 
