@@ -11,3 +11,5 @@ Example controlled Senders for Openframeworks, Cinder and Processing can be used
 
 Credit to Eric Medine who came up with the idea.
 
+SpoutControls is licenced using the GNU Lesser General Public License.
+
