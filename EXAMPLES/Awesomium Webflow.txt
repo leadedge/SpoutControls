@@ -1,0 +1,44 @@
+/*{
+	"CREDIT": "by Lynn Jarvis - spout.zeal.co",
+	"DESCRIPTION": "Awesomium Webflow",
+	"CATEGORIES": [
+		"Parameter adjustment"
+	],
+	"INPUTS": [
+		{
+			"NAME": "Enter URL",
+			"TYPE": "text",
+			"TEXT": ""
+		},
+		{
+			"NAME": "YouTube ID",
+			"TYPE": "text",
+			"TEXT": ""
+		},
+		{
+			"NAME": "Selection mode",
+			"TYPE": "bool",
+			"DEFAULT": 0
+		},		
+		{
+			"NAME": "Flip left",
+			"TYPE": "event",
+			"DEFAULT": 0
+		},
+		{
+			"NAME": "Flip right",
+			"TYPE": "event",
+			"DEFAULT": 0
+		},
+		{
+			"NAME": "Close page",
+			"TYPE": "event",
+			"DEFAULT": 0
+		},
+		{
+			"NAME": "Quit",
+			"TYPE": "event",
+			"DEFAULT": 0
+		},
+	]
+}*/

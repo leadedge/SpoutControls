@@ -1,0 +1,45 @@
+/*{
+	"CREDIT": "SpoutControls - spout.zeal.co",
+	"DESCRIPTION": "ofxFlickr",
+	"CATEGORIES": [
+	"Parameter adjustment"
+	],
+	"INPUTS": [
+		{
+			"NAME": "Search",
+			"TYPE": "text",
+			"TEXT": "birds"
+		},
+		{
+			"NAME": "Number",
+			"TYPE": "text",
+			"TEXT": "100"
+		},
+		{
+			"NAME": "Delay",
+			"TYPE": "text",
+			"TEXT": "1.0"
+		},
+		{
+			"NAME": "Slideshow",
+			"TYPE": "bool",
+			"MIN": 0.00,
+			"MAX": 1.00,
+			"DEFAULT": 1.00
+		},
+		{
+			"NAME": "Next",
+			"TYPE": "event",
+			"MIN": 0.00,
+			"MAX": 1.00,
+			"DEFAULT": 1.00
+		},
+		{
+			"NAME": "Back",
+			"TYPE": "event",
+			"MIN": 0.00,
+			"MAX": 1.00,
+			"DEFAULT": 1.00
+		},
+	],
+}*/

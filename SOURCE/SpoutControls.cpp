@@ -1,0 +1,1243 @@
+﻿//
+//		SpoutControls
+//
+//		Allows an application to control a Spout sender
+//
+//		CONTROLLER
+//
+//		  SETUP
+//			1) Controls are established using a JSON template file
+//			   based on the requirements of the proposed sender
+//			2) Using this template file, the controller configures
+//			   it's user interface with the required controls
+//			3) Create a vector of controls with : name, type, value, text
+//			4) Create the controller memory mapping for communication with the sender
+//					CreateControls(string mapname, vector<control> controls);
+//					This creates :
+//						A mutex to control access to the memory map
+//						A registry entry with the map name for the sender to retrieve
+//
+//		   OPERATION
+//			1) Update the controls vector and the controller map when the controls change
+//					SetControls (string mapname, vector<control> controls);
+//						This releases the access mutex for the sender to read
+//						Sends a "Ready" message to the mailslot with name defined by the mapname
+//						WriteMail(string mapname, string SlotMessage);
+//					It will fail if the mailsot has not been created by the sender,	but the
+//					sender will get the message if it is running and act on the new controls
+//
+//		  SHUTDOWN
+//			1)		ReleaseControls()
+//			   This :
+//					Closes the memory map and it's handle
+//					Closes the access mutex handle
+//					Writes a null string to the registry memory map name
+//				Only the app that Created the control map should release it
+//
+//
+//		SENDER
+//
+//		  SETUP
+//			1) Create an empty control vector
+//			2) Find the control map name in the registry if it exists
+//					FindControls();
+//					This :
+//						Finds the map name in the registry
+//						Creates a mailslot to receive messages from the controller
+//						and returns a handle to the mail that can be used to access it.
+//						CreateMail(string mapname, HANDLE &hSlot);
+//			3) Get the control data from the control map into the control vector
+//					GetControls(vector<control> &controls);
+//					This :
+//						Checks the access mutex
+//						Locks the access mutex
+//						Reads the memory map
+//						Releases the access mutex
+//
+//		  OPERATION
+//			1) Check for updated controls
+//					CheckControls(vector<control> &controls);
+//					This :
+//						Checks for a message in the mailslot from the controller
+//						which means that controls have been updated by SetControls
+//							CheckMail(string mapname, HANDLE hSlot);
+//						Gets the latest control data from the control map
+//							GetControls(vector<control> &controls);
+//			2) Use the new control data
+//
+//		  SHUTDOWN
+//			1) Managed by the class destructor
+//				Releases the mailsot
+//					CloseHandle(hSlot);
+//				Releases mutex and map
+//
+// ====================================================================================
+//		Revisions :
+//
+//		21.06.15	- project start
+//		08.07.15	- project Version 1
+//		16.07.15	- changed CheckControls to return the control index that was changed
+//					  int SpoutControls::CheckControls(vector<control> &controls)
+//		17.07.15	- introduced two versions of CheckControls
+//					  introduced Lesser GPL licence
+//		22.07.15	- included CreateControl
+//					- removed  clear control file path from the registry
+//					  so that it remains for controllers to find the last sender started
+//		27.07.15	- Added "OpenSpoutController"
+//
+// ====================================================================================
+//
+//		Copyright (C) 2015. Lynn Jarvis, Leading Edge. Pty. Ltd.
+//
+//		This program is free software: you can redistribute it and/or modify
+//		it under the terms of the GNU Lesser General Public License as published by
+//		the Free Software Foundation, either version 3 of the License, or
+//		(at your option) any later version.
+//
+//		This program is distributed in the hope that it will be useful,
+//		but WITHOUT ANY WARRANTY; without even the implied warranty of
+//		MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//		GNU Lesser General Public License for more details.
+//
+//		You will receive a copy of the GNU Lesser General Public License along 
+//		with this program.  If not, see http://www.gnu.org/licenses/.
+//
+#include "SpoutControls.h"
+
+SpoutControls::SpoutControls()
+{
+	m_sharedMemoryName = ""; // Memory map name sring
+	m_hSharedMemory = NULL; // Memory map handle
+	m_pBuffer = NULL; // Shared memory pointer
+	m_hAccessMutex = NULL; // Map access mutex
+	m_hSlot = NULL; // Handle to the mailslot
+	m_dwSize = 0; // Size of the memory map
+
+}
+
+
+//---------------------------------------------------------
+SpoutControls::~SpoutControls()
+{
+	Cleanup();
+}
+
+
+// ======================================================================
+//								Public
+// ======================================================================
+
+//---------------------------------------------------------
+// Create a controls memory map, existence mutex and access mutex
+bool SpoutControls::CreateControls(string mapname, vector<control> controls)
+{
+	string	mutexName;
+	string sharedMemoryName;
+
+	// Create a mutex to control the write / read
+	mutexName = mapname;
+	mutexName += "ControlsAccess";
+	mutexName += "_mutex";
+	m_hAccessMutex = CreateMutexA(NULL, TRUE, mutexName.c_str()); // initial ownership
+	if (!m_hAccessMutex) {
+		// printf("Mutex creation failed\n");
+		return false;
+	}
+
+	// Create a memory map that will contain the updated control information
+	m_sharedMemoryName = mapname; // Global shared memory name used throughout
+
+	sharedMemoryName = mapname;
+	sharedMemoryName += "Controls";
+	sharedMemoryName += "_map";				
+
+	// Calculate the size required for the memory map
+	// First 4 bytes on the first line are the size of the control array
+	// Next the information for each control
+	// Type DWORD (4 bytes) Name (16 bytes) Data (256 bytes) - total 276 bytes per control
+	// Total : 276 + size *(276)
+	m_dwSize = 276 + (DWORD)(controls.size()*276);
+
+	// Create the shared memory map
+	m_hSharedMemory = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, m_dwSize, (LPCSTR)sharedMemoryName.c_str());
+	if (m_hSharedMemory == NULL || m_hSharedMemory == INVALID_HANDLE_VALUE) { 
+		// printf("Writer - error occured while creating file mapping object : %d\n", GetLastError() );
+		CloseHandle(m_hAccessMutex);
+		return false;
+	}
+
+	// Map a view to get a pointer to write to
+	m_pBuffer = (LPTSTR)MapViewOfFile(m_hSharedMemory, FILE_MAP_ALL_ACCESS, 0, 0, m_dwSize);
+	if (m_pBuffer == NULL) { 
+		// printf("Writer - error occured while mapping view of the file : %d\n", GetLastError() );
+		CloseHandle(m_hSharedMemory);
+		CloseHandle(m_hAccessMutex);
+		return false;
+	}
+
+	WriteControls(m_pBuffer, controls);
+
+	UnmapViewOfFile(m_pBuffer);
+
+	// End of creation so unlock the access mutex
+	// If the reader tries to access the memory there will be nothing in it
+	ReleaseMutex(m_hAccessMutex);
+
+	return true;
+}
+
+
+bool SpoutControls::SetControls(vector<control> controls)
+{
+
+	if(UpdateControls(controls)) {
+		// Inform the sender that new control data is ready
+		WriteMail(m_sharedMemoryName, "Ready");
+		return true;
+	}
+
+	return false;
+}
+
+
+
+//---------------------------------------------------------
+// Find a control map and update it with the controls
+bool SpoutControls::UpdateControls(vector<control> controls)
+{
+	string mutexName;
+	string memoryMapName; // local name of the shared memory
+	HANDLE hMemory = NULL; // local handle to shared memory
+	LPTSTR pBuf = NULL; // local shared memory pointer
+	HANDLE hAccessMutex = NULL;
+	DWORD dwWaitResult;
+	DWORD dwMapSize = 0;
+	char *buf = NULL;
+	char temp[256];
+
+	//
+	// Controller writes to the memory map to update control data
+	//
+
+	// Check the access mutex
+	mutexName = m_sharedMemoryName; // mapname;
+	mutexName += "ControlsAccess";
+	mutexName += "_mutex";
+	hAccessMutex = OpenMutexA(MUTEX_ALL_ACCESS, 0, mutexName.c_str());
+	if(!hAccessMutex) {
+		// printf("SetControls - access mutex does not exist\n");
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	dwWaitResult = WaitForSingleObject(m_hAccessMutex, 67);
+	if (dwWaitResult != WAIT_OBJECT_0) { // reader is accessing it
+		// printf("SetControls - reader is using access mutex\n");
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	// The mutex is now locked so that the reader does not read while writing
+
+	// The memory map name is defined by the global mapname
+	memoryMapName = m_sharedMemoryName; // local name;
+	memoryMapName += "Controls";
+	memoryMapName += "_map";	
+
+	// ====================================
+	// At this stage the map size is not known, but it's size 
+	// is the first 4 bytes of the map, so read that first to get the size
+	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4, (LPCSTR)memoryMapName.c_str());
+	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
+		// printf("Error occured while opening file mapping object : %d\n", GetLastError() );
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, 4); // only 4 bytes to read
+	if (pBuf == NULL || pBuf[0] == 0) { 
+		// printf("Error occured while mapping view of the file : %d\n", GetLastError() );
+		if(pBuf) UnmapViewOfFile(pBuf);
+		CloseHandle(hMemory);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	// Retrieve the map size - the first 4 bytes
+	buf = (char *)pBuf; // moveable pointer
+	for(int i = 0; i<4; i++)
+		temp[i] = *buf++;
+	temp[4] = 0;
+	dwMapSize = (DWORD)atoi(temp);
+
+	// Now close the map and re-open it with the known size
+	UnmapViewOfFile(pBuf);
+	CloseHandle(hMemory);
+
+	// First check that the map size is correct for the control vector passed
+	// First 4 bytes on the first line are the size of the control array
+	// Next the information for each control
+	// Type DWORD (4 bytes) Name (16 bytes) Data (256 bytes) - total 276 bytes per control
+	// Total : 276 + size *(276)
+	if(dwMapSize != (276 + (DWORD)(controls.size()*276)) ) {
+		// printf("Map / control sizes do not match\n");
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	// Now open the full map and write the control data to it
+	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, dwMapSize, (LPCSTR)memoryMapName.c_str());
+	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, dwMapSize);
+	if (pBuf == NULL) { 
+		// printf("Error occured while mapping view of the file : %d\n", GetLastError() );
+		CloseHandle(hMemory);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	//
+	// Write the controls to the memory map
+	//
+	WriteControls(pBuf, controls);
+
+	UnmapViewOfFile(pBuf); // Finished with the buffer
+	CloseHandle(hMemory); // Closes the memory map
+	ReleaseMutex(hAccessMutex); // Unlock the access mutex so that the reader can read from the memory map
+	CloseHandle(hAccessMutex);// Close the local handle
+
+	return true;
+}
+
+
+//---------------------------------------------------------
+// Get controls from an existing map
+bool SpoutControls::GetControls(vector<control> &controls)
+{
+	string mutexName;
+	string memoryMapName; // local name of the shared memory
+	HANDLE hMemory = NULL; // local handle to shared memory
+	LPTSTR pBuf = NULL; // local shared memory pointer
+	HANDLE hAccessMutex = NULL;
+	DWORD dwWaitResult;
+	DWORD dwMapSize = 0;
+	int nControls = 0;
+	int ControlType = 0;
+	float ControlValue = 0; // Float value of a control
+	string ControlText; // Text data of a control
+	char *buf = NULL;
+	char temp[256];
+
+	//
+	// Reader reads the memory map to retrieve control data
+	//
+
+	// Check the access mutex
+	mutexName = m_sharedMemoryName; // mapname;
+	mutexName += "ControlsAccess";
+	mutexName += "_mutex";
+	hAccessMutex = OpenMutexA(MUTEX_ALL_ACCESS, 0, mutexName.c_str());
+	if(!hAccessMutex) {
+		// printf("SpoutControls::GetControls - No access mutex\n");
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	dwWaitResult = WaitForSingleObject(hAccessMutex, 67);
+	if (dwWaitResult != WAIT_OBJECT_0) { // writer is accessing it
+		// printf("SpoutControls::GetControls - writer is accessing it (%d)\n", dwWaitResult);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	// The mutex is now locked so that the writer does not write while reading
+
+	// The memory map name is defined by the global mapname
+	memoryMapName = m_sharedMemoryName;
+	memoryMapName += "Controls";
+	memoryMapName += "_map";	
+
+	// ====================================
+	// At this stage the map size is not known, but it's size is the
+	// first 4 bytes of the map so read that first to get the size
+	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4, (LPCSTR)memoryMapName.c_str());
+	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
+		// printf("SpoutControls::GetControls - Error occured while opening file mapping object : %d\n", GetLastError() );
+		ReleaseMutex(hAccessMutex);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, 4); // only 4 bytes to read
+	// Did the mapping fail or is there nothing in the map
+	if (pBuf == NULL || pBuf[0] == 0) { 
+		// printf("SpoutControls::GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
+		if(pBuf) UnmapViewOfFile(pBuf);
+		CloseHandle(hMemory);
+		ReleaseMutex(hAccessMutex);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	// Retrieve the map size - the first 4 bytes
+	buf = (char *)pBuf; // moveable pointer
+	for(int i = 0; i<4; i++)
+		temp[i] = *buf++;
+	temp[4] = 0;
+	dwMapSize = (DWORD)atoi(temp);
+
+	// Now close the map and re-open it with the known size
+	UnmapViewOfFile(pBuf);
+	CloseHandle(hMemory);
+
+	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, dwMapSize, (LPCSTR)memoryMapName.c_str());
+	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
+		// printf("SpoutControls::GetControls - CreateFileMapping failed\n");
+		ReleaseMutex(hAccessMutex);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, dwMapSize);
+	if (pBuf == NULL) { 
+		// printf("SpoutControls::GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
+		CloseHandle(hMemory);
+		ReleaseMutex(hAccessMutex);
+		CloseHandle(hAccessMutex);
+		return false;
+	}
+
+	//
+	// Get the controls from the memory map
+	//
+	ReadControls(pBuf, controls);
+
+	// Finished with the buffer
+	UnmapViewOfFile(pBuf);
+
+	// Reader closes the memory map
+	CloseHandle(hMemory);
+
+	// Unlock the access mutex so that the writer can write to the memory map
+	ReleaseMutex(hAccessMutex);
+	
+	// Close the local mutex handle
+	// All handles must be closed before the writer finally closes with the creation handle
+	CloseHandle(hAccessMutex);
+
+	return true;
+}
+
+
+
+// The sender provides the map name. creates the mailslot and writes the map name to the registry
+bool SpoutControls::OpenControls(string mapname)
+{
+	char Path[MAX_PATH];
+	HRESULT hr;
+	Path[0] = 0;
+
+	// Set the global map name
+	m_sharedMemoryName = mapname;
+
+	// Create the mailslot
+	CreateMail(m_sharedMemoryName, m_hSlot);
+
+	// Write the name to the registry to identify the memory map
+	WritePathToRegistry(m_sharedMemoryName.c_str(), "Software\\Leading Edge\\Spout", "ControlMap");
+
+	// If the user has created controls, find the programdata or executable path and write the control file
+	m_ControlFilePath[0] = 0;
+	if(filecontrols.size() > 0) {
+		// Find or create the Spout programdata folder
+		// Look for "ProgramData" if it exists
+		hr = SHGetFolderPathA(NULL, CSIDL_COMMON_APPDATA, NULL, 0, Path);
+		if (SUCCEEDED(hr)) {
+			sprintf_s(m_ControlFilePath, MAX_PATH, "%s\\Spout", Path);
+			CreateDirectoryA((LPCSTR)m_ControlFilePath, NULL); // Will create if it does not exist
+			// RemoveDirectoryA((LPCSTR)SpoutPath);
+			strcat_s(m_ControlFilePath, MAX_PATH, "\\");
+			strcat_s(m_ControlFilePath, mapname.c_str());
+			strcat_s(m_ControlFilePath, ".txt"); // The control file name
+		}
+
+		// If that failed use the executable path
+		if(!m_ControlFilePath[0]) {
+			GetModuleFileNameA(NULL, Path, sizeof(Path));
+			PathRemoveFileSpecA(Path);
+			strcat_s(Path, MAX_PATH, "\\");
+			strcat_s(Path, mapname.c_str());
+			strcat_s(Path, ".txt"); // The control file name
+			strcpy_s(m_ControlFilePath, MAX_PATH, Path);
+			// printf("[%s]\n", m_ControlFilePath);
+		}
+
+		printf("Control file [%s]\n", m_ControlFilePath);
+		CreateControlFile(m_ControlFilePath);
+
+		// Write the control file path to the registry
+		WritePathToRegistry(m_ControlFilePath, "Software\\Leading Edge\\Spout", "ControlFile");
+
+	}
+	return false;
+}
+
+
+// Find the control map name in the registry
+bool SpoutControls::FindControls(string &mapname)
+{
+	char path[MAX_PATH];
+
+	// Find the if controller map name exists the registry
+	if(ReadPathFromRegistry(path, "Software\\Leading Edge\\Spout", "ControlMap") ) {
+		if(path[0] > 0) {
+			mapname = path;
+			return true;
+		}
+	}
+
+	return false;
+
+}
+
+
+//---------------------------------------------------------
+bool SpoutControls::CloseControls()
+{
+
+	// Release all handles etc
+	Cleanup();
+
+	return true;
+}
+
+
+//---------------------------------------------------------
+bool SpoutControls::OpenSpoutController()
+{
+	char Path[MAX_PATH];
+	HRESULT hr;
+	Path[0] = 0;
+	// Find Program Files (x86) for a SpoutController installation
+	hr = SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, Path);
+	if (SUCCEEDED(hr)) {
+		strcat_s(Path, MAX_PATH, "\\SpoutControls\\SPOUTCONTROLLER\\SpoutController.exe");
+		// Does the file exist
+		if(PathFileExistsA(Path) ) {
+			// Launch SpoutController
+			SHELLEXECUTEINFOA ShExecInfo;
+			ZeroMemory(&ShExecInfo, sizeof(ShExecInfo));
+			ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+			ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+			ShExecInfo.hwnd = NULL;
+			ShExecInfo.lpVerb = NULL;
+			ShExecInfo.lpFile = (LPCSTR)Path;
+			ShExecInfo.lpParameters = "";
+			ShExecInfo.lpDirectory = NULL;
+			ShExecInfo.nShow = SW_SHOW;
+			ShExecInfo.hInstApp = NULL;	
+			ShellExecuteExA(&ShExecInfo);
+			Sleep(125); // alow time to open
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+// Check the mailslot and return all controls
+bool SpoutControls::CheckControls(vector<control> &controls)
+{
+
+	// if intialized already, check for a message from the controller
+	if(CheckMail(m_sharedMemoryName, m_hSlot)) {
+		// Get the new controls
+		GetControls(controls);
+		return true;
+	}
+
+	return false;
+
+}
+
+
+
+// ======================================================================
+//				Sender functions to create a control file
+// ======================================================================
+bool SpoutControls::CreateControl(string name, string type)
+{
+	return CreateFileControl(name, type, 0.0f, 1.0f, 1.0, "");
+}
+
+bool SpoutControls::CreateControl(string name, string type, float value)
+{
+	return CreateFileControl(name, type, 0.0f, value, value, ""); // Min. max, default
+}
+
+bool SpoutControls::CreateControl(string name, string type, string text)
+{
+	return CreateFileControl(name, type, 0.0f, 1.0f, 1.0, text);
+}
+
+bool SpoutControls::CreateControl(string name, string type, float minimum, float maximum, float value)
+{
+	return CreateFileControl(name, type, minimum, maximum, value, "");
+}
+
+
+// Used by the controller to find the control file path
+// and find the control map name in the registry
+bool SpoutControls::FindControlFile(string &filepath)
+{
+	char path[MAX_PATH];
+
+	// Find the if controller map name exists the registry
+	if(ReadPathFromRegistry(path, "Software\\Leading Edge\\Spout", "ControlFile") ) {
+		if(path[0] > 0) {
+			filepath = path;
+			return true;
+		}
+	}
+
+	return false;
+
+}
+// ======================================================================
+//								Private
+// ======================================================================
+
+
+// Create a file control and add to the sender's filecontrol vector
+bool SpoutControls::CreateFileControl(string name, string type, float minimum, float maximum, float value, string text)
+{
+	filecontrol fc;
+
+	if(name.empty() || type.empty()) {
+		// printf("Empty name or type\n");
+		return false;
+	}
+
+	fc.name = name;
+	fc.desc = type;
+	fc.min = minimum;
+	fc.max = maximum;
+	fc.def = value;
+	fc.value = value;
+	fc.text = text.c_str();
+
+	if(type == "bool")
+		fc.fftype = 0; // checkbox
+	if(type == "event")
+		fc.fftype = 1; // button
+	if(type == "float")
+		fc.fftype = 10; // float slider
+	if(type == "text")
+		fc.fftype = 100; // text
+
+	filecontrols.push_back(fc);
+
+	return true;
+}
+
+// Create a JSON control file from the filecontrols vector
+bool SpoutControls::CreateControlFile(const char *filepath)
+{
+	string linestring;
+	char path[MAX_PATH];
+	char temp[256];
+
+	if(!filepath[0] || filecontrols.empty())
+		return false;
+
+	strcpy_s(path, MAX_PATH, filepath);
+
+	// Write the contents of the parameter list
+	//
+	// Example
+	//
+
+	/*{
+		"CREDIT": "by Lynn Jarvis - spout.zeal.co",
+		"DESCRIPTION": "SpoutControls",
+		"CATEGORIES": [
+			"Parameter adjustment"
+		],
+			"INPUTS": [
+			{
+				"NAME": "User text",
+				"TYPE": "text",
+				"DEFAULT": 0
+			},
+			{
+				"NAME": "Rotate",
+				"TYPE": "bool",
+				"DEFAULT": 1
+			},
+			{
+				"NAME": "Speed",
+				"TYPE": "float",
+				"MIN": 0.0,
+				"MAX": 4.0,
+				"DEFAULT": 0.5
+			},
+		]
+	}*/
+
+	// Create the file
+	std::ofstream sourceFile(path);
+	// Source file created OK ?
+	if(sourceFile.is_open()) {
+		
+		// Create the JSON header
+		linestring = "/*{\n";
+		sourceFile.write(linestring.c_str(), linestring.length());
+
+		sprintf_s(temp, 256, "	\"CREDIT\": \"SpoutControls - spout.zeal.co\",\n");
+		sourceFile.write(temp, strlen(temp));
+
+		PathStripPathA(path);
+		PathRemoveExtensionA(path);
+		sprintf_s(temp, 256, "	\"DESCRIPTION\": \"%s\",\n", path);
+		sourceFile.write(temp, strlen(temp));
+
+		sprintf_s(temp, 256, "	\"CATEGORIES\": [\n");
+		sourceFile.write(temp, strlen(temp));
+		sprintf_s(temp, 256, "	\"Parameter adjustment\"\n");
+		sourceFile.write(temp, strlen(temp));
+		sprintf_s(temp, 256, "	],\n");
+		sourceFile.write(temp, strlen(temp));
+		sprintf_s(temp, 256, "	\"INPUTS\": [\n");
+		sourceFile.write(temp, strlen(temp));
+
+		// Write the control data here
+		// Example
+		// {
+		// 	"NAME": "Speed",
+		// 	"TYPE": "float",
+		// 	"MIN": 0.0,
+		// 	"MAX": 4.0,
+		//	"DEFAULT": 0.5
+		// },
+		for(unsigned int i = 0; i < filecontrols.size(); i++) {
+			sprintf_s(temp, 256, "		{\n");
+			sourceFile.write(temp, strlen(temp));
+			sprintf_s(temp, 256, "			\"NAME\": \"%s\",\n", filecontrols.at(i).name.c_str());
+			sourceFile.write(temp, strlen(temp));
+			sprintf_s(temp, 256, "			\"TYPE\": \"%s\",\n", filecontrols.at(i).desc.c_str());
+			sourceFile.write(temp, strlen(temp));
+			if(filecontrols.at(i).desc != "text") {
+				sprintf_s(temp, 256, "			\"MIN\": %.2f,\n", filecontrols.at(i).min);
+				sourceFile.write(temp, strlen(temp));
+				sprintf_s(temp, 256, "			\"MAX\": %.2f,\n", filecontrols.at(i).max);
+				sourceFile.write(temp, strlen(temp));
+				sprintf_s(temp, 256, "			\"DEFAULT\": %.2f\n", filecontrols.at(i).def);
+				sourceFile.write(temp, strlen(temp));
+			}
+			else {
+				sprintf_s(temp, 256, "			\"TEXT\": \"%s\"\n", filecontrols.at(i).text.c_str());
+				sourceFile.write(temp, strlen(temp));
+			}
+			sprintf_s(temp, 256, "		},\n");
+			sourceFile.write(temp, strlen(temp));
+		}
+
+		sprintf_s(temp, 256, "	],\n");
+		sourceFile.write(temp, strlen(temp));
+		sprintf_s(temp, 256, "}*/\n");
+		sourceFile.write(temp, strlen(temp));
+
+		sourceFile.close();
+	}
+	else {
+		MessageBoxA(NULL, "File not created", "Info", MB_OK);
+	}
+
+	return true;
+}
+
+
+//---------------------------------------------------------
+// Write control map with updated values
+bool SpoutControls::WriteControls(void *pBuffer, vector<control> controls)
+{
+	//
+	//		Write the control data to shared memory
+	//		The writer knows the memory map size to open it (m_dwSize)
+	//
+	float fValue = 0;
+	char desc[256];
+	char *buffer; // the buffer to store in shared memory
+	char *buf; // pointer within the buffer
+	int i, j;
+
+	buffer = (char *)malloc(m_dwSize*sizeof(unsigned char));
+
+	// Clear the buffer to zero so that there is a null for each data line
+	ZeroMemory(buffer, m_dwSize*sizeof(unsigned char));
+	buf = buffer; // pointer within the buffer
+
+	// The first 4 bytes of the first line is the memory map size so the reader knows how big it is
+	// printf("Writing the memory map size (%d)\n", m_dwSize);
+	sprintf_s(desc, 256, "%4d", m_dwSize);
+	for(i = 0 ; i< 4; i++) 
+		*buf++ = desc[i];
+
+	// The next 4 bytes contains the number of controls
+	ZeroMemory(desc, 256);
+	sprintf_s(desc, 256, "%4d", (DWORD)controls.size());
+	for(i = 0 ; i< 4; i++) 
+		*buf++ = desc[i];
+
+	// Move on 268 bytes to the start of the controls (each memory map line is 276 bytes)
+	buf += 268;
+
+	// Next the controls and their data
+	// Name (16 bytes) Type (4 bytes) Data (256 bytes) - total 276 bytes per control
+	for(i = 0; i < (int)controls.size(); i++) {
+
+		// Control name - 16 bytes
+		ZeroMemory(desc, 256);
+		if(controls.at(i).name.c_str()[0])
+			sprintf_s(desc, 256, "%s", controls.at(i).name.c_str());
+		for(j = 0 ; j<16; j++)
+			*buf++ = desc[j];
+
+		// Control type - 4 bytes
+		ZeroMemory(desc, 256);
+		sprintf_s(desc, 256, "%4d", (DWORD)controls.at(i).type);
+		for(j = 0 ; j<4; j++)
+			*buf++ = desc[j];
+
+		// Control data - 256 bytes
+		ZeroMemory(desc, 256);
+		if(controls.at(i).type == 100) { // Text data
+			if(controls.at(i).text[0]) {
+				sprintf_s(desc, 256, "%s", controls.at(i).text.c_str());
+			}
+		}
+		else {
+			fValue = controls.at(i).value;
+			sprintf_s(desc, 256, "%f", fValue); // float data
+		}
+
+
+		// copy it with 256 length
+		for(j = 0 ; j<256; j++)	
+			*buf++ = desc[j];
+	
+	} // end all controls
+
+	// Now transfer to shared memory which will be the same size
+	memcpy( (void *)pBuffer, (void *)buffer, m_dwSize );
+
+	free((void *)buffer);
+
+	return true;
+}
+
+
+//---------------------------------------------------------
+// Read controls from the memory map
+bool SpoutControls::ReadControls(void *pBuffer, vector<control> &controls)
+{
+	char *buf = NULL;
+	char temp[256];
+	int i, j, nControls;
+	control control;
+
+	//
+	// Get the controls
+	//
+	buf = (char *)pBuffer; // moveable pointer
+	buf += 4; // The first 4 bytes of the first line is the memory map size, so skip that
+
+	// the next 4 bytes contains the number of controls
+	for(i = 0; i<4; i++)
+		temp[i] = *buf++;
+	temp[4] = 0;
+	nControls = atoi(temp);
+
+	// Move on 268 bytes to the control data (each line is 276 bytes)
+	buf += 268;
+
+	// Clear the controls vector
+	controls.clear();
+
+	// Fill it again (use previously found size)
+	for(i = 0; i<nControls; i++) {
+
+		control.name.clear();
+		control.text.clear();
+		control.value = 0;
+		control.type = 0;
+
+		// First 16 bytes are the control name
+		ZeroMemory(temp, 256);
+		for(j = 0; j<16; j++)
+			temp[j] = *buf++;
+		temp[16] = 0;
+		if(temp[0])
+			control.name = temp;
+													
+		// Control type
+		ZeroMemory(temp, 256);
+		for(j = 0; j<4; j++)
+			temp[j] = *buf++;
+		temp[4] = 0;
+		control.type = atoi(temp);
+
+		// Next 256 bytes on the same line are allocated to the float or string data
+		ZeroMemory(temp, 256);
+		for(j = 0; j<256; j++)
+			temp[j] = *buf++;
+
+		if(control.type == 100) { // text data
+			if(temp[0]) {
+				control.text = temp;
+			}
+		}
+		else { // float data
+			control.value = (float)atof(temp);
+		}
+		
+		controls.push_back(control);
+
+	} // Done all controls
+
+	return true;
+}
+
+
+// Sender creates the mailslot
+bool SpoutControls::CreateMail(string SlotName, HANDLE &hSlot)
+{
+	HANDLE hslot = NULL;
+	string slotstring;
+
+	slotstring = "\\\\.\\mailslot\\";
+	slotstring += SlotName;
+    hslot = CreateMailslotA(slotstring.c_str(), 
+							0, // no maximum message size 
+							2, // Time-out for operations TODO - check ?
+							(LPSECURITY_ATTRIBUTES) NULL); // default security
+
+	if (hslot == INVALID_HANDLE_VALUE)  { 
+		// Want no delay here
+		// DWORD dwError = GetLastError();
+		// printf("CreateMailslot (%s) failed with %d\n", SlotName.c_str(), dwError);
+		// if(GetLastError() == ERROR_ALREADY_EXISTS) printf("CreateMailslot (%s) already exists (%x)(%x)\n", SlotName.c_str(), hSlot, m_hSlot);
+        return false;
+	}
+
+	hSlot = hslot;
+
+	return true;
+}
+
+
+// Controller writes to the mailslot
+bool SpoutControls::WriteMail(string SlotName, string SlotMessage)
+{
+	string slotstring;
+	HANDLE hFile; 
+	BOOL fResult; 
+	DWORD dwWritten; 
+
+	slotstring = "\\\\.\\mailslot\\";
+	slotstring += SlotName;
+	
+	hFile = CreateFileA(	slotstring.c_str(),
+						GENERIC_WRITE,
+						FILE_SHARE_READ,
+						(LPSECURITY_ATTRIBUTES)NULL,
+						OPEN_EXISTING, 
+						FILE_ATTRIBUTE_NORMAL, 
+						(HANDLE)NULL); 
+ 
+	if (hFile == INVALID_HANDLE_VALUE) { 
+		// The system cannot find the file specified
+		// printf("CreateFile failed with %d.\n", GetLastError()); 
+		return false; 
+   } 
+
+	fResult = WriteFile(hFile, 
+						SlotMessage.c_str(),
+						(DWORD) (strlen(SlotMessage.c_str())+1)*sizeof(TCHAR),  
+						&dwWritten, 
+						(LPOVERLAPPED)NULL); 
+	if (!fResult) { 
+		// printf("WriteFile failed with error (%d)\n", GetLastError()); 
+		CloseHandle(hFile);
+		return false; 
+	} 
+ 
+	CloseHandle(hFile);
+
+	return true;
+}
+
+
+// Sender checks the mailslot for messages
+bool SpoutControls::CheckMail(string SlotName, HANDLE hSlot)
+{
+	if(hSlot == NULL)
+		return false;
+
+	string slotmessage; // Not used but could return the message
+
+	return ReadMail(SlotName, hSlot, slotmessage);
+
+}
+
+
+// Sender reads the mailslot to determine whether
+// a message is ready and clears pending messages
+bool SpoutControls::ReadMail(string SlotName, HANDLE hSlot, string &SlotMessage)
+{
+	DWORD cbMessage, cMessage, cbRead; 
+	BOOL fResult; 
+	LPTSTR lpszBuffer; 
+	char achID[80];
+	DWORD cAllMessages; 
+	HANDLE hEvent;
+	OVERLAPPED ov;
+ 
+	cbMessage = cMessage = cbRead = 0; 
+
+	hEvent = CreateEvent(NULL, FALSE, FALSE, TEXT("SpoutControlsSlotEvent"));
+    if( NULL == hEvent )
+		return false;
+	
+	ov.Offset = 0;
+	ov.OffsetHigh = 0;
+	ov.hEvent = hEvent;
+ 
+	fResult = GetMailslotInfo(	hSlot, // mailslot handle 
+								(LPDWORD) NULL,               // no maximum message size 
+								&cbMessage,                   // size of next message 
+								&cMessage,                    // number of messages 
+								(LPDWORD)NULL);               // no read time-out. TODO : 1/2 frame timeout ?
+ 
+	if (!fResult) { 
+		// printf("GetMailslotInfo failed with %d.\n", GetLastError()); 
+		CloseHandle(hEvent);
+        return false; 
+	} 
+ 
+	if (cbMessage == MAILSLOT_NO_MESSAGE) { 
+		CloseHandle(hEvent);
+		return false; 
+	} 
+
+	cAllMessages = cMessage; 
+
+	while (cMessage != 0) { // retrieve all messages
+
+		// Allocate memory for the message. 
+		// TODO - cleanup
+		lpszBuffer = (LPTSTR) GlobalAlloc(GPTR, lstrlen((LPTSTR)achID)*sizeof(TCHAR) + cbMessage); 
+		if( NULL == lpszBuffer ) return false;
+		lpszBuffer[0] = '\0'; 
+ 
+		fResult = ReadFile(	hSlot, 
+							lpszBuffer, 
+							cbMessage, 
+							&cbRead, 
+							&ov); 
+ 
+		if (!fResult) { 
+			// printf("ReadFile failed with %d.\n", GetLastError()); 
+			GlobalFree((HGLOBAL) lpszBuffer);
+			CloseHandle(hEvent);
+			return false; 
+		} 
+ 
+		fResult = GetMailslotInfo(	hSlot,           // mailslot handle 
+									(LPDWORD) NULL,  // no maximum message size 
+									&cbMessage,      // size of next message 
+									&cMessage,       // number of messages 
+									(LPDWORD) NULL); // no read time-out 
+ 
+		if (!fResult) { 
+			// printf("GetMailslotInfo failed (%d)\n", GetLastError());
+			GlobalFree((HGLOBAL) lpszBuffer); 
+			CloseHandle(hEvent);
+			return false; 
+		} 
+
+		// We only return the last message here but it could be extended to a vector of strings
+		SlotMessage = (LPSTR)lpszBuffer;
+ 
+		GlobalFree((HGLOBAL) lpszBuffer); 
+
+	} // end all messages
+
+	CloseHandle(hEvent);
+
+	return true;
+}
+
+
+bool SpoutControls::ReadPathFromRegistry(char *filepath, const char *subkey, const char *valuename)
+{
+	HKEY  hRegKey;
+	LONG  regres;
+	DWORD  dwSize, dwKey;  
+
+	dwSize = MAX_PATH;
+
+	// Does the key exist
+	regres = RegOpenKeyExA(HKEY_CURRENT_USER, subkey, NULL, KEY_READ, &hRegKey);
+	if(regres == ERROR_SUCCESS) {
+		// Read the key Filepath value
+		regres = RegQueryValueExA(hRegKey, valuename, NULL, &dwKey, (BYTE*)filepath, &dwSize);
+		RegCloseKey(hRegKey);
+		if(regres == ERROR_SUCCESS)
+			return true;
+	}
+
+	// Just quit if the key does not exist
+	return false;
+
+}
+
+bool SpoutControls::WritePathToRegistry(const char *filepath, const char *subkey, const char *valuename)
+{
+	HKEY  hRegKey;
+	LONG  regres;
+	char  mySubKey[512];
+
+	// The required key
+	strcpy_s(mySubKey, 512, subkey);
+
+	// Does the key already exist ?
+	regres = RegOpenKeyExA(HKEY_CURRENT_USER, mySubKey, NULL, KEY_ALL_ACCESS, &hRegKey);
+	if(regres != ERROR_SUCCESS) {
+		// Create a new key
+		regres = RegCreateKeyExA(HKEY_CURRENT_USER, mySubKey, NULL, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hRegKey, NULL);
+	}
+
+	if(regres == ERROR_SUCCESS && hRegKey != NULL) {
+		// Write the path
+		regres = RegSetValueExA(hRegKey, valuename, 0, REG_SZ, (BYTE*)filepath, ((DWORD)strlen(filepath) + 1)*sizeof(unsigned char));
+		// For immediate read after write - necessary here becasue the app that opeded SpoutPanel
+		// will read the registry straight away and it might not be available yet
+		// The key must have been opened with the KEY_QUERY_VALUE access right (included in KEY_ALL_ACCESS)
+		RegFlushKey(hRegKey); // needs an open key
+		RegCloseKey(hRegKey); // Done with the key
+    }
+
+	if(regres == ERROR_SUCCESS)
+		return true;
+	else
+		return false;
+
+}
+
+
+bool SpoutControls::ReadDwordFromRegistry(DWORD *pValue, const char *subkey, const char *valuename)
+{
+	HKEY  hRegKey;
+	LONG  regres;
+	DWORD  dwSize, dwKey;  
+
+	dwSize = MAX_PATH;
+
+	// Does the key exist
+	regres = RegOpenKeyExA(HKEY_CURRENT_USER, subkey, NULL, KEY_READ, &hRegKey);
+	if(regres == ERROR_SUCCESS) {
+		// Read the key DWORD value
+		regres = RegQueryValueExA(hRegKey, valuename, NULL, &dwKey, (BYTE*)pValue, &dwSize);
+		RegCloseKey(hRegKey);
+		if(regres == ERROR_SUCCESS)
+			return true;
+	}
+
+	// Just quit if the key does not exist
+	return false;
+
+}
+
+bool SpoutControls::WriteDwordToRegistry(DWORD dwValue, const char *subkey, const char *valuename)
+{
+	HKEY  hRegKey;
+	LONG  regres;
+	char  mySubKey[512];
+
+	// The required key
+	strcpy_s(mySubKey, 512, subkey);
+
+	// Does the key already exist ?
+	regres = RegOpenKeyExA(HKEY_CURRENT_USER, mySubKey, NULL, KEY_ALL_ACCESS, &hRegKey);
+	if(regres != ERROR_SUCCESS) { 
+		// Create a new key
+		regres = RegCreateKeyExA(HKEY_CURRENT_USER, mySubKey, NULL, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hRegKey, NULL);
+	}
+
+	if(regres == ERROR_SUCCESS && hRegKey != NULL) {
+		// Write the DWORD value
+		regres = RegSetValueExA(hRegKey, valuename, 0, REG_DWORD, (BYTE*)&dwValue, 4);
+		// For immediate read after write - necessary here because the app might set the values 
+		// and read the registry straight away and it might not be available yet
+		// The key must have been opened with the KEY_QUERY_VALUE access right (included in KEY_ALL_ACCESS)
+		RegFlushKey(hRegKey); // needs an open key
+		RegCloseKey(hRegKey); // Done with the key
+    }
+
+	if(regres == ERROR_SUCCESS)
+		return true;
+	else
+		return false;
+
+}
+
+
+bool SpoutControls::RemovePathFromRegistry(char *subkey, const char *value)
+{
+	HKEY  hRegKey;
+	LONG  regres;
+
+	// Does the key exist
+	regres = RegOpenKeyExA(HKEY_CURRENT_USER, (LPCSTR)subkey, 0, KEY_ALL_ACCESS, &hRegKey);
+	if (regres == ERROR_SUCCESS) {
+		regres = RegDeleteValueA(hRegKey, value); // Deletes the controlmap entry altogether
+		RegCloseKey(hRegKey);
+		return true;
+	}
+
+	// Just quit if the key does not exist
+	return false;
+
+}
+
+//---------------------------------------------------------
+bool SpoutControls::Cleanup()
+{
+	// Cleanup for this class
+	if(m_pBuffer) UnmapViewOfFile(m_pBuffer);
+	if(m_hSharedMemory) CloseHandle(m_hSharedMemory);
+	if(m_hAccessMutex) CloseHandle(m_hAccessMutex);
+	if(m_hSlot) {
+		CloseHandle(m_hSlot);
+		// A sender so clear the map name from the registry
+		RemovePathFromRegistry("Software\\Leading Edge\\Spout", "ControlMap");
+	}
+	m_pBuffer = NULL;
+	m_hSharedMemory = NULL;
+	m_hAccessMutex = NULL;
+	m_hSlot = NULL;
+
+	// Release the filecontrols vector created by a sender
+	if(filecontrols.size() > 0) {
+		filecontrols.clear();
+	}
+
+	return true;
+}
+
