@@ -58,7 +58,7 @@ class testApp : public ofBaseApp{
 		// - - - - - - - - - - - - - - - - - - - - - - - - -
 		// SpoutControls
 		//
-		SpoutControls spoutcontrols;	// SpoutControls object
+		SpoutControls *spoutcontrols;	// SpoutControls object
 		vector<control> myControls;		// Vector of controls to be used
 		void UpdateControlParameters();	// Control update function
 

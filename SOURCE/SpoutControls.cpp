@@ -17,6 +17,7 @@
 //					  so that it remains for controllers to find the last sender started
 //		27.07.15	- Added "OpenSpoutController"
 //		18.08.15	- Cleanup for 1.002 release
+//		24.09.15	- re-ordering in cleanup
 //
 // ====================================================================================
 //
@@ -73,7 +74,7 @@ bool SpoutControls::CreateControls(string mapname, vector<control> controls)
 	mutexName += "_mutex";
 	m_hAccessMutex = CreateMutexA(NULL, TRUE, mutexName.c_str()); // initial ownership
 	if (!m_hAccessMutex) {
-		// printf("Mutex creation failed\n");
+		printf("CreateControls : Mutex creation failed\n");
 		return false;
 	}
 
@@ -94,7 +95,7 @@ bool SpoutControls::CreateControls(string mapname, vector<control> controls)
 	// Create the shared memory map
 	m_hSharedMemory = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, m_dwSize, (LPCSTR)sharedMemoryName.c_str());
 	if (m_hSharedMemory == NULL || m_hSharedMemory == INVALID_HANDLE_VALUE) { 
-		// printf("Writer - error occured while creating file mapping object : %d\n", GetLastError() );
+		printf("CreateControls : error occured while creating file mapping object : %d\n", GetLastError() );
 		CloseHandle(m_hAccessMutex);
 		return false;
 	}
@@ -102,7 +103,7 @@ bool SpoutControls::CreateControls(string mapname, vector<control> controls)
 	// Map a view to get a pointer to write to
 	m_pBuffer = (LPTSTR)MapViewOfFile(m_hSharedMemory, FILE_MAP_ALL_ACCESS, 0, 0, m_dwSize);
 	if (m_pBuffer == NULL) { 
-		// printf("Writer - error occured while mapping view of the file : %d\n", GetLastError() );
+		printf("CreateControls : error occured while mapping view of the file : %d\n", GetLastError() );
 		CloseHandle(m_hSharedMemory);
 		CloseHandle(m_hAccessMutex);
 		return false;
@@ -158,14 +159,14 @@ bool SpoutControls::UpdateControls(vector<control> controls)
 	mutexName += "_mutex";
 	hAccessMutex = OpenMutexA(MUTEX_ALL_ACCESS, 0, mutexName.c_str());
 	if(!hAccessMutex) {
-		// printf("SetControls - access mutex does not exist\n");
+		printf("UpdateControls - access mutex does not exist\n");
 		CloseHandle(hAccessMutex);
 		return false;
 	}
 
 	dwWaitResult = WaitForSingleObject(m_hAccessMutex, 67);
 	if (dwWaitResult != WAIT_OBJECT_0) { // reader is accessing it
-		// printf("SetControls - reader is using access mutex\n");
+		printf("UpdateControls - reader is using access mutex\n");
 		CloseHandle(hAccessMutex);
 		return false;
 	}
@@ -182,14 +183,14 @@ bool SpoutControls::UpdateControls(vector<control> controls)
 	// is the first 4 bytes of the map, so read that first to get the size
 	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4, (LPCSTR)memoryMapName.c_str());
 	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
-		// printf("Error occured while opening file mapping object : %d\n", GetLastError() );
+		printf("UpdateControls : Error occured while opening file mapping object : %d\n", GetLastError() );
 		CloseHandle(hAccessMutex);
 		return false;
 	}
 
 	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, 4); // only 4 bytes to read
 	if (pBuf == NULL || pBuf[0] == 0) { 
-		// printf("Error occured while mapping view of the file : %d\n", GetLastError() );
+		printf("UpdateControls : Error occured while mapping view of the file : %d\n", GetLastError() );
 		if(pBuf) UnmapViewOfFile(pBuf);
 		CloseHandle(hMemory);
 		CloseHandle(hAccessMutex);
@@ -213,7 +214,7 @@ bool SpoutControls::UpdateControls(vector<control> controls)
 	// Type DWORD (4 bytes) Name (16 bytes) Data (256 bytes) - total 276 bytes per control
 	// Total : 276 + size *(276)
 	if(dwMapSize != (276 + (DWORD)(controls.size()*276)) ) {
-		// printf("Map / control sizes do not match\n");
+		printf("UpdateControls : Map / control sizes do not match\n");
 		CloseHandle(hAccessMutex);
 		return false;
 	}
@@ -227,7 +228,7 @@ bool SpoutControls::UpdateControls(vector<control> controls)
 
 	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, dwMapSize);
 	if (pBuf == NULL) { 
-		// printf("Error occured while mapping view of the file : %d\n", GetLastError() );
+		printf("UpdateControls : Error occured while mapping view of the file : %d\n", GetLastError() );
 		CloseHandle(hMemory);
 		CloseHandle(hAccessMutex);
 		return false;
@@ -275,14 +276,14 @@ bool SpoutControls::GetControls(vector<control> &controls)
 	mutexName += "_mutex";
 	hAccessMutex = OpenMutexA(MUTEX_ALL_ACCESS, 0, mutexName.c_str());
 	if(!hAccessMutex) {
-		// printf("SpoutControls::GetControls - No access mutex\n");
+		printf("GetControls : No access mutex\n");
 		CloseHandle(hAccessMutex);
 		return false;
 	}
 
 	dwWaitResult = WaitForSingleObject(hAccessMutex, 67);
 	if (dwWaitResult != WAIT_OBJECT_0) { // writer is accessing it
-		// printf("SpoutControls::GetControls - writer is accessing it (%d)\n", dwWaitResult);
+		printf("GetControls - writer is accessing it (%d)\n", dwWaitResult);
 		CloseHandle(hAccessMutex);
 		return false;
 	}
@@ -299,7 +300,7 @@ bool SpoutControls::GetControls(vector<control> &controls)
 	// first 4 bytes of the map so read that first to get the size
 	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4, (LPCSTR)memoryMapName.c_str());
 	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
-		// printf("SpoutControls::GetControls - Error occured while opening file mapping object : %d\n", GetLastError() );
+		printf("GetControls - Error occured while opening file mapping object : %d\n", GetLastError() );
 		ReleaseMutex(hAccessMutex);
 		CloseHandle(hAccessMutex);
 		return false;
@@ -308,7 +309,7 @@ bool SpoutControls::GetControls(vector<control> &controls)
 	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, 4); // only 4 bytes to read
 	// Did the mapping fail or is there nothing in the map
 	if (pBuf == NULL || pBuf[0] == 0) { 
-		// printf("SpoutControls::GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
+		printf("GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
 		if(pBuf) UnmapViewOfFile(pBuf);
 		CloseHandle(hMemory);
 		ReleaseMutex(hAccessMutex);
@@ -329,7 +330,7 @@ bool SpoutControls::GetControls(vector<control> &controls)
 
 	hMemory = CreateFileMappingA ( INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, dwMapSize, (LPCSTR)memoryMapName.c_str());
 	if (hMemory == NULL || hMemory == INVALID_HANDLE_VALUE) { 
-		// printf("SpoutControls::GetControls - CreateFileMapping failed\n");
+		printf("GetControls - CreateFileMapping failed\n");
 		ReleaseMutex(hAccessMutex);
 		CloseHandle(hAccessMutex);
 		return false;
@@ -337,7 +338,7 @@ bool SpoutControls::GetControls(vector<control> &controls)
 
 	pBuf = (LPTSTR)MapViewOfFile(hMemory, FILE_MAP_ALL_ACCESS, 0, 0, dwMapSize);
 	if (pBuf == NULL) { 
-		// printf("SpoutControls::GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
+		printf("GetControls - Error occured while mapping view of the file : %d\n", GetLastError() );
 		CloseHandle(hMemory);
 		ReleaseMutex(hAccessMutex);
 		CloseHandle(hAccessMutex);
@@ -409,11 +410,14 @@ bool SpoutControls::OpenControls(string mapname)
 			// printf("[%s]\n", m_ControlFilePath);
 		}
 
-		printf("Control file [%s]\n", m_ControlFilePath);
+		// printf("OpenControls : control file [%s]\n", m_ControlFilePath);
 		CreateControlFile(m_ControlFilePath);
 
 		// Write the control file path to the registry
 		WritePathToRegistry(m_ControlFilePath, "Software\\Leading Edge\\Spout", "ControlFile");
+
+		// LJ DEBUG
+		WritePathToRegistry(m_ControlFilePath, "Software\\Leading Edge\\Spout", m_sharedMemoryName.c_str());
 
 	}
 	return false;
@@ -530,11 +534,18 @@ bool SpoutControls::FindControlFile(string &filepath)
 {
 	char path[MAX_PATH];
 
-	// Find the if controller map name exists the registry
+	// Find if the controller map file name exists the registry
 	if(ReadPathFromRegistry(path, "Software\\Leading Edge\\Spout", "ControlFile") ) {
 		if(path[0] > 0) {
+			 
+			// 24.08.15 - add existence check
+			if(_access(path, 0) == -1) // Mode 0 - existence check
+				return false;
+			
+			// File found
 			filepath = path;
 			return true;
+
 		}
 	}
 
@@ -1150,25 +1161,41 @@ bool SpoutControls::RemovePathFromRegistry(char *subkey, const char *value)
 }
 
 //---------------------------------------------------------
-bool SpoutControls::Cleanup()
+void SpoutControls::CloseMap()
 {
-	// Cleanup for this class
 	if(m_pBuffer) UnmapViewOfFile(m_pBuffer);
 	if(m_hSharedMemory) CloseHandle(m_hSharedMemory);
 	if(m_hAccessMutex) CloseHandle(m_hAccessMutex);
-	if(m_hSlot) {
-		CloseHandle(m_hSlot);
-		// A sender so clear the map name from the registry
-		RemovePathFromRegistry("Software\\Leading Edge\\Spout", "ControlMap");
-	}
 	m_pBuffer = NULL;
 	m_hSharedMemory = NULL;
 	m_hAccessMutex = NULL;
-	m_hSlot = NULL;
+
+}
+
+
+//---------------------------------------------------------
+bool SpoutControls::Cleanup()
+{
+	// Cleanup for this class
 
 	// Release the filecontrols vector created by a sender
 	if(filecontrols.size() > 0) {
 		filecontrols.clear();
+	}
+
+	// Release all objects
+	if(m_pBuffer) UnmapViewOfFile(m_pBuffer);
+	if(m_hSharedMemory) CloseHandle(m_hSharedMemory);
+	if(m_hAccessMutex) CloseHandle(m_hAccessMutex);
+	m_pBuffer = NULL;
+	m_hSharedMemory = NULL;
+	m_hAccessMutex = NULL;
+	
+	if(m_hSlot) {
+		// For a sender, clear the map name from the registry
+		RemovePathFromRegistry("Software\\Leading Edge\\Spout", "ControlMap");
+		CloseHandle(m_hSlot);
+		m_hSlot = NULL;
 	}
 
 	return true;

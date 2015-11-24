@@ -39,6 +39,7 @@
 			 - Recompiled for both DX9 and DX11 for new installer
 	26.05.15 - Recompile for revised SpoutPanel registry write of sender name
 	22.07.05 - Included CreateControl functions
+	25.09.15 - Updated for 2.005 memoryshare
 
 */
 #include "cinder/app/AppBasic.h"
@@ -73,6 +74,7 @@ class SpoutBoxApp : public AppBasic {
 	void prepareSettings(Settings *settings);
 	void shutdown();
 	bool bInitialized;							// true if a sender initializes OK
+	bool bMemoryShare;                          // True for memoryshare moded
 	unsigned int g_Width, g_Height;				// size of the texture being sent out
 	char SenderName[256];						// sender name 
 	gl::Texture spoutTexture;					// Local Cinder texture used for sharing
@@ -126,13 +128,14 @@ void SpoutBoxApp::setup()
 
 	// Initialize a sender
 	bInitialized = spoutsender.CreateSender(SenderName, g_Width, g_Height);
+	// Detect texture share compatibility for status display
+	bMemoryShare = spoutsender.GetMemoryShareMode();
 	// ----------------------------
 
 	// ------------ SpoutControls ----------------
 	// 
 	// Controls vary cube rotation and speed
-	// Defaults should match those in the controls
-	// definition JSON file "SpoutControls.txt"
+	// Defaults should be the same as when creating the controls below.
 	//
 	m_bRotate = true;
 	m_RotationSpeed = 0.5f; // Rotation amount min-max
@@ -169,7 +172,10 @@ void SpoutBoxApp::setup()
 	spoutcontrols.CreateControl("Rotate", "bool", 1);
 	spoutcontrols.CreateControl("Speed", "float", 0.0, 4.0, 0.5);
 
-	// The sender now initializes a name and writes this to the registry
+	// "OpenControls" creates a control file with the same name as the sender
+	// and the control information is wrtitten to it.
+
+	// The sender also writes the sender name to the registry
 	// for the controller to access. The controller can then use this name
 	// to create a memory map and update it as the controls are changed.
 	
@@ -201,7 +207,7 @@ void SpoutBoxApp::update()
 
 	// ------------ SpoutControls ----------------
 	// The controller creates controls when this sender is running
-	// and updates them when the user changes a control
+	// and updates them when the user changes a control,
 	// so just check them here before drawing
 	if(spoutcontrols.CheckControls(myControls))
 		UpdateControlParameters();
@@ -243,7 +249,10 @@ void SpoutBoxApp::draw()
 	if(!m_UserText.empty()) {
 		gl::setMatricesWindow( getWindowSize() );
 		gl::enableAlphaBlending();
-		gl::drawString( m_UserText.c_str(), Vec2f( toPixels( 20 ), toPixels( 50 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 48 ) ) );
+		if(bMemoryShare)
+			gl::drawString( m_UserText.c_str(), Vec2f( toPixels( 20 ), toPixels( 70 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 48 ) ) );
+		else
+			gl::drawString( m_UserText.c_str(), Vec2f( toPixels( 20 ), toPixels( 50 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 48 ) ) );
 		gl::disableAlphaBlending();
 	}
 	// -------------------------------------------
@@ -266,10 +275,16 @@ void SpoutBoxApp::draw()
 	}
 
 	// Show the user what it is sending
-	sprintf_s(txt, "Sending as [%s]", SenderName);
+	sprintf_s(txt, "Controlled sender [%s]", SenderName);
 	gl::setMatricesWindow( getWindowSize() );
 	gl::enableAlphaBlending();
 	gl::drawString( txt, Vec2f( toPixels( 20 ), toPixels( 20 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 24 ) ) );
+
+	if(bMemoryShare) {
+		sprintf_s(txt, "Memoryshare mode");
+		gl::drawString( txt, Vec2f( toPixels( 20 ), toPixels( 40 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 24 ) ) );
+	}
+
 	sprintf_s(txt, "fps : %2.2d", (int)getAverageFps());
 	gl::drawString( txt, Vec2f(getWindowWidth() - toPixels( 100 ), toPixels( 20 ) ), Color( 1, 1, 1 ), Font( "Verdana", toPixels( 24 ) ) );
 	gl::disableAlphaBlending();
@@ -282,8 +297,8 @@ void SpoutBoxApp::draw()
 //
 void SpoutBoxApp::UpdateControlParameters()
 {
-	// Control names and types must match those in the controls definition
-	// JSON file "SpoutControls.txt". Control names are case sensitive
+	// Control names and types must match those in the controls definition file
+	// The control names are case sensitive
 	for(UINT i=0; i<myControls.size(); i++) {
 		if(myControls.at(i).name == "User text")
 			m_UserText = myControls.at(i).text;

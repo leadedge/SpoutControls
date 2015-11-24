@@ -89,6 +89,7 @@ class SPOUT_DLLEXP SpoutControls {
 	bool CreateControls(string mapname, vector<control> controls);
 	bool SetControls   (vector<control> controls);
 	bool Cleanup();
+	void CloseMap();
 
 	bool FindControlFile (string &filepath);
 

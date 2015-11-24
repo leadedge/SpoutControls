@@ -9,6 +9,9 @@
 
 	22.07.15 - VS2010 example project
 	27.07.15 - Added SpoutControls "OpenSpoutController"
+	24.09.15 - changed spoutcontrols object to pointer instead of an object in the header
+			 - Do not delete obects on exit because they are gone anyway. 
+			   Intermittent crash if they are deleted. Cause unknown.
 
 	=========================================================================
 	Copyright (C) 2015 Lynn Jarvis.
@@ -103,12 +106,16 @@ void testApp::setup(){
 	//	Create a float control with maximum, minimum and default values
 	//	bool CreateControl(string name, string type, float minimum, float maximum, float value);
 	//
+	//	Defaults should be the same as when creating the controls below.
+	spoutcontrols = new SpoutControls; // Create a new Spout Controls object
+	spoutcontrols->CreateControl("User text", "text", "Spout sender control");
+	spoutcontrols->CreateControl("Rotate", "bool", 1);
+	spoutcontrols->CreateControl("Speed", "float", 0.0, 4.0, 0.5);
 
-	spoutcontrols.CreateControl("User text", "text", "Spout sender control");
-	spoutcontrols.CreateControl("Rotate", "bool", 1);
-	spoutcontrols.CreateControl("Speed", "float", 0.0, 4.0, 0.5);
+	// "OpenControls" creates a control file with the same name as the sender
+	// and the control information is wrtitten to it.
 
-	// The sender now initializes a name and writes this to the registry
+	// The sender also writes the sender name to the registry
 	// for the controller to access. The controller can then use this name
 	// to create a memory map and update it as the controls are changed.
 	
@@ -116,13 +123,13 @@ void testApp::setup(){
 	// The controller updates the controls and sends a message when they change.
 	// The sender checks for a message and updates it's control variables.
 
-	spoutcontrols.OpenControls(sendername);
+	spoutcontrols->OpenControls(sendername);
 
 	// Optionally open the SpoutController executable program
 	// if the application is not going to be controlled using
 	// the Freeframe plugin "SpoutController.dll".
 	// Space bar to bring it back if closed or minimized
-	spoutcontrols.OpenSpoutController();
+	// spoutcontrols->OpenSpoutController();
 
 	// - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -137,7 +144,7 @@ void testApp::update() {
 	//
 	// Check for a message from the controller 
 	// and update local control variables for any change.
-	if(spoutcontrols.CheckControls(myControls))
+	if(spoutcontrols->CheckControls(myControls))
 		UpdateControlParameters();
 
 }
@@ -153,8 +160,12 @@ void testApp::draw(){
 	// available in "update" so do it now when there is definitely a render window.
 
 	// Initialize a sender
-	if(!bInitialized)
+	if(!bInitialized) {
 		bInitialized = spoutsender->CreateSender(sendername, g_Width, g_Height);
+		// Detect texture share compatibility for status display
+		bMemoryShare = spoutsender->GetMemoryShareMode();
+		return;
+	}
 
 	// - - - - - - - - - - - - - - - - - - - - - - - - -
 	// Draw 3D graphics demo - this could be anything
@@ -172,7 +183,7 @@ void testApp::draw(){
 	// - - - - - - - - - SpoutControls - - - - - - - - - -
 	//
 	sprintf_s(str, "%s", m_UserText.c_str()); // Show plugin text
-	verdana.drawString(str, 20, 50);
+	verdana.drawString(str, 20, 70);
 	
 	if(m_bRotate) {
 		m_RotY+=m_RotationSpeed;
@@ -192,8 +203,12 @@ void testApp::draw(){
 
 		// Show what it is sending
 		ofSetColor(255); 
-		sprintf_s(str, "Sending as : [%s]", sendername);
+		sprintf_s(str, "Controlled sender : [%s]", sendername);
 		ofDrawBitmapString(str, 20, 20);
+		if(bMemoryShare) {
+			sprintf_s(str, "Memoryshare mode");
+			ofDrawBitmapString(str, 20, 35);
+		}
 
 		// Show fps
 		sprintf_s(str, "fps: %3.3d", (int)ofGetFrameRate());
@@ -207,18 +222,18 @@ void testApp::draw(){
 //--------------------------------------------------------------
 void testApp::exit() { 
 
-	// Release the sender
-	spoutsender->ReleaseSender(); 
-
-	// At program termination, clean up everything
-	delete spoutsender;
-	spoutsender = NULL;
-
 	//
 	// - - - - - - - - - SpoutControls - - - - - - - - - -
 	//
 	// The sender initializes the communication with the controller so must also close it 
-	spoutcontrols.CloseControls();
+	spoutcontrols->CloseControls();
+
+	// Release the sender
+	spoutsender->ReleaseSender(); 
+
+	// Release objects
+	if(spoutcontrols) delete spoutcontrols;
+	if(spoutsender) delete spoutsender;
 
 }
 
@@ -271,7 +286,8 @@ bool testApp::InitGLtexture(GLuint &texID, unsigned int width, unsigned int heig
 void testApp::keyPressed(int key){
 	// Space bar to bring back SpoutController
 	if(key == 32) {
-		spoutcontrols.OpenSpoutController();
+		// Optional if the controller program is being used
+		// spoutcontrols->OpenSpoutController();
 	}
 }
 
