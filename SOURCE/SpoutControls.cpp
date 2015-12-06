@@ -431,12 +431,15 @@ bool SpoutControls::FindControls(string &mapname)
 
 	// Find the if controller map name exists the registry
 	if(ReadPathFromRegistry(path, "Software\\Leading Edge\\Spout", "ControlMap") ) {
+		// printf("3\n");
 		if(path[0] > 0) {
+			// printf("4 (%s)\n", path);
 			mapname = path;
+			// printf("5\n");
 			return true;
 		}
 	}
-
+	// printf("4\n");
 	return false;
 
 }
@@ -552,6 +555,22 @@ bool SpoutControls::FindControlFile(string &filepath)
 	return false;
 
 }
+
+// Used by a multiple controlled senders to copy the control file from ProgramData to the local dll directory
+bool SpoutControls::CopyControlFile (string &filepath, string &destpath)
+{
+	// copy from source to destination
+	// printf("Copying :\nFrom : \n[%s]\nTo : \n[%s]\n", filepath.c_str(), destpath.c_str());
+	if(CopyFileA((LPCSTR)filepath.c_str(), (LPCSTR)destpath.c_str(), false)) {
+		// printf("Copy suceeded\n");
+		return true;
+	}
+	// printf("Copy failed\n");
+	return false;
+}
+
+
+
 // ======================================================================
 //								Private
 // ======================================================================

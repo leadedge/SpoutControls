@@ -92,6 +92,7 @@ class SPOUT_DLLEXP SpoutControls {
 	void CloseMap();
 
 	bool FindControlFile (string &filepath);
+	bool CopyControlFile (string &filepath, string &destpath);
 
 	// The sender being controlled
 	bool CreateControl(string name, string type);

@@ -1,5 +1,5 @@
 //
-//          Spout Sender Control
+//          SpoutBox
 //
 //      Demonstrates using "SpoutControls"
 //      for controlling a Spout Sender
@@ -48,7 +48,9 @@ void setup() {
   spout = new Spout();
 
   // INITIALIZE A SPOUT SENDER HERE
-  sendername = "Spout Processing";
+  // FOR SPOUTCONTROLS THE SENDER NAME
+  // MUST BE THE SAME AS THE SKETCH
+  sendername = "SpoutBox";
   spout.initSender(sendername, width, height);
   
   //
@@ -178,5 +180,3 @@ void exit() {
 
   super.exit();
 } 
-
-
