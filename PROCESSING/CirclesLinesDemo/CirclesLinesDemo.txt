@@ -1,0 +1,30 @@
+/*{
+	"CREDIT": "SpoutControls - spout.zeal.co",
+	"DESCRIPTION": "CirclesLinesDemo",
+	"CATEGORIES": [
+	"Parameter adjustment"
+	],
+	"INPUTS": [
+		{
+			"NAME": "Show Lines",
+			"TYPE": "bool",
+			"MIN": 0.00,
+			"MAX": 1.00,
+			"DEFAULT": 1.00
+		},
+		{
+			"NAME": "Number Circles",
+			"TYPE": "float",
+			"MIN": 0.00,
+			"MAX": 200.00,
+			"DEFAULT": 15.00
+		},
+		{
+			"NAME": "Movement Speed",
+			"TYPE": "float",
+			"MIN": 0.00,
+			"MAX": 4.00,
+			"DEFAULT": 1.00
+		},
+	],
+}*/

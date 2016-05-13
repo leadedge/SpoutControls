@@ -2,7 +2,7 @@
 
 					SpoutControls.h
 
-		Copyright (c) 2015, Lynn Jarvis. All rights reserved.
+		Copyright (c) 2015-2016, Lynn Jarvis. All rights reserved.
 
 		Redistribution and use in source and binary forms, with or without modification, 
 		are permitted provided that the following conditions are met:
@@ -29,11 +29,14 @@
 //		Revisions :
 //
 //		18.08.15	- Cleanup for 1.002 release
+//		11.05.16	- 1.007
 //
 #pragma once
 
 #ifndef __SpoutControls__
 #define __SpoutControls__
+
+#include "spoutSDK.h"
 
 #include <Shlobj.h> // to get the program folder path
 #include <Knownfolders.h>
@@ -41,16 +44,14 @@
 #include <direct.h> // for directories
 #include <io.h> // for file existence check
 
-#include "spoutSDK.h"
-
 #pragma comment(lib, "comsuppw") // for _bstr_t
 
 // Warnings disabled in this project : C4250
 
 // ISF to freeframe parameters
 struct filecontrol {
-	string name;
-	string desc;    // To link with descriptons "TYPE"
+	std::string name;
+	std::string desc;    // To link with descriptons "TYPE"
 					// "event"
 					// "bool"
 					// "long"
@@ -64,17 +65,17 @@ struct filecontrol {
 	float  value;   // user float value
 	float  min;		// Minimum
 	float  max;		// Maximum
-	string text;	// text value
+	std::string text;	// text value
 	// TODO deftext
 };
 
 
 
 struct control {
-    string name;
+    std::string name;
     int type; // 0-checkbox, 1-button, 10-float, 100-string
     float value;
-    string text;
+    std::string text;
 };
 
 class SPOUT_DLLEXP SpoutControls {
@@ -85,25 +86,26 @@ class SPOUT_DLLEXP SpoutControls {
     ~SpoutControls();
 
 	// The controller
-	bool FindControls  (string &mapname);
-	bool CreateControls(string mapname, vector<control> controls);
-	bool SetControls   (vector<control> controls);
+	bool FindControls  (std::string &mapname);
+	bool CreateControls(std::string mapname, vector<control> controls);
+	bool SetControls   (std::vector<control> controls);
 	bool Cleanup();
 	void CloseMap();
 
-	bool FindControlFile (string &filepath);
-	bool CopyControlFile (string &filepath, string &destpath);
+	bool FindControlFile (std::string &filepath);
+	bool CopyControlFile (std::string &filepath, std::string &destpath);
 
 	// The sender being controlled
-	bool CreateControl(string name, string type);
-	bool CreateControl(string name, string type, float value);
-	bool CreateControl(string name, string type, string text);
-	bool CreateControl(string name, string type, float minimum, float maximum, float value);
+	bool CreateControl(std::string name, std::string type);
+	bool CreateControl(std::string name, std::string type, float value);
+	bool CreateControl(std::string name, std::string type, std::string text);
+	bool CreateControl(std::string name, std::string type, float minimum, float maximum, float value);
 
-	bool OpenControls (string mapname);
-	bool CheckControls(vector<control> &controls);
+	bool OpenControls (std::string mapname);
+	bool GetControls  (std::vector<control> &controls);
+	bool CheckControls(std::vector<control> &controls);
 	bool CloseControls();
-	bool OpenSpoutController();
+	bool OpenSpoutController(std::string CommandLine = "");
 
 	// Utility for other apps
 	bool WritePathToRegistry   (const char *filepath, const char *subkey, const char *valuename);
@@ -114,7 +116,7 @@ class SPOUT_DLLEXP SpoutControls {
 
 protected :
 
-	string m_sharedMemoryName; // Memory map name
+	std::string m_sharedMemoryName; // Memory map name
 	HANDLE m_hSharedMemory; // Memory map handle
 	LPTSTR m_pBuffer; // Shared memory pointer
 	HANDLE m_hAccessMutex; // Map access mutex
@@ -125,18 +127,16 @@ protected :
 	vector<filecontrol> filecontrols; // Vector of control information used to create the sender control file
 
 	bool UpdateControls(vector<control> controls);
-	bool GetControls  (vector<control> &controls);
-	bool WriteControls(void *pBuffer, vector<control> controls);
-	bool ReadControls (void *pBuffer, vector<control> &controls);
+	bool WriteControls(void *pBuffer, std::vector<control> controls);
+	bool ReadControls (void *pBuffer, std::vector<control> &controls);
 
-	bool CreateMail(string slotname, HANDLE &hSlot);
-	bool WriteMail (string SlotName, string SlotMessage);
-	bool ReadMail  (string SlotName, HANDLE hSlot, string &SlotMessage);
-	bool CheckMail (string SlotName, HANDLE hSlot);
+	bool CreateMail(std::string slotname, HANDLE &hSlot);
+	bool WriteMail (std::string SlotName, std::string SlotMessage);
+	bool ReadMail  (std::string SlotName, HANDLE hSlot, std::string &SlotMessage);
+	bool CheckMail (std::string SlotName, HANDLE hSlot);
 
-	bool CreateFileControl(string name, string type, float minimum, float maximum, float value, string text);
+	bool CreateFileControl(std::string name, string type, float minimum, float maximum, float value, std::string text);
 	bool CreateControlFile(const char *filepath);
-
 
 };
 

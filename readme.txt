@@ -17,11 +17,7 @@ SpoutController.dll
 
 A 32-bit freeframe dll controller as well as a Spout Receiver 
 
-  o Copy to the plugin folder of the host application
-  o Seen by the host as a source plugin
-  o Start the sender to be controlled
-  o Activate the plugin
-
+Refer to the SpoutControls documentation for folder requirements.
 
 -----------------------------
 "OPENFRAMEWORKS"
@@ -30,10 +26,9 @@ An example controlled sender application developed using using C++.
 
 All the dependent dlls and data folder have to be with the executable.
 
-Run "ofSpoutController.exe"
+Run "ofSpoutSenderControl.exe"
 
-It will respond to the "SpoutController.dll" Freeframe plugin or
-the "SpoutController.exe" dialog controls.
+It will respond to the the "SpoutController.exe" dialog controls.
 
 This is a Spout sender so if you open any receiver you will see the changes in it as well.
 
@@ -47,17 +42,12 @@ Cinder equivalent to the openframeworks example.
 -----------------------------
 "PROCESSING"
 
-Win32
-x64
+The SpoutController FreeFrame plugin can be used to control any Spout sender. 
+This includes senders created with Processing.
 
-A controlled Spout Sender sketch including a controller dll and supporting pde files.
+The "SpoutBox" folder is an example of how a Spout sender sketch can be used.
 
-1) Run the "SpoutSenderControl" sketch
-2) Run a freeframe host and activate the "SpoutController.dll" plugin
-3) The sketch will respond to changes of the freeframe dll controls.
-
-Operates in the same way as for the Openframeworks example. Examine the sketch source for details.
-
+See the SpoutControls documentation for further information.
 
 
 -----------------------------
